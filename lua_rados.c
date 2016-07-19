@@ -18,7 +18,7 @@ static char reg_key_rados_refs;
 
 typedef enum
 {
-  CREATED,
+  CONFIGURING,
   CONNECTED,
   SHUTDOWN
 } cluster_state_t;
@@ -28,6 +28,18 @@ typedef struct lua_rados_t
   rados_t cluster;
   cluster_state_t state;
 } lua_rados_t;
+
+typedef enum
+{
+  OPEN,
+  CLOSED
+} ioctx_state_t;
+
+typedef struct lua_ioctx_t
+{
+  rados_ioctx_t io;
+  ioctx_state_t state;
+} lua_ioctx_t;
 
 /* Get rados object at stack index.  */
 
@@ -65,12 +77,18 @@ lua_rados_checkcluster_conn (lua_State *lstate, int pos)
   return rados;
 }
 
-/* Get rados_ioctx_t object.  */
+/* Get opened rados ioctx object at stack index. Error if had closed.  */
 
-static inline rados_ioctx_t
+static inline lua_ioctx_t *
 lua_rados_checkioctx (lua_State *lstate, int pos)
 {
-  return *(rados_ioctx_t *) luaL_checkudata (lstate, pos, LRAD_TIOCTX_T);
+  lua_ioctx_t *ioctx;
+
+  ioctx = (lua_ioctx_t *) luaL_checkudata (lstate, pos, LRAD_TIOCTX_T);
+  if (ioctx->state != OPEN)
+    luaL_argerror (lstate, pos, "cannout reuse closed ioctx handle");
+
+  return ioctx;
 }
 
 /* Push nil-error protocol values.  */
@@ -186,7 +204,7 @@ lua_rados_create (lua_State *lstate)
     id = NULL;
 
   rados = (lua_rados_t *) lua_newuserdata (lstate, sizeof (*rados));
-  rados->state = CREATED;
+  rados->state = CONFIGURING;
 
   luaL_getmetatable (lstate, LRAD_TRADOS_T);
   lua_setmetatable (lstate, -2);
@@ -291,16 +309,19 @@ lua_rados_open_ioctx (lua_State *lstate)
 {
   lua_rados_t *rados;
   const char *pool_name;
-  rados_ioctx_t *ioctx;
+  lua_ioctx_t *ioctx;
   int ret;
 
   rados = lua_rados_checkcluster_conn (lstate, 1);
   pool_name = luaL_checkstring (lstate, 2);
-  ioctx = (rados_ioctx_t *) lua_newuserdata (lstate, sizeof (*ioctx));
+
+  ioctx = (lua_ioctx_t *) lua_newuserdata (lstate, sizeof (*ioctx));
+  ioctx->state = OPEN;
+
   luaL_getmetatable (lstate, LRAD_TIOCTX_T);
   lua_setmetatable (lstate, -2);
 
-  ret = rados_ioctx_create (rados->cluster, pool_name, ioctx);
+  ret = rados_ioctx_create (rados->cluster, pool_name, &ioctx->io);
   if (ret)
     return lua_rados_pusherror (lstate, ret);
 
@@ -328,7 +349,6 @@ lua_rados_cluster_gc (lua_State *lstate)
   lua_rados_t *rados;
 
   rados = lua_rados_checkcluster_1 (lstate, 1);
-
   if (rados->state == CONNECTED)
     rados_shutdown (rados->cluster);
 
@@ -349,10 +369,13 @@ lua_rados_cluster_gc (lua_State *lstate)
 static int
 lua_rados_ioctx_close (lua_State *lstate)
 {
-  rados_ioctx_t io;
+  lua_ioctx_t *ioctx;
 
-  io = lua_rados_checkioctx (lstate, 1);
-  rados_ioctx_destroy (io);
+  ioctx = lua_rados_checkioctx (lstate, 1);
+  if (ioctx->state == OPEN)
+    rados_ioctx_destroy (ioctx->io);
+
+  ioctx->state = CLOSED;
 
   return 0;
 }
@@ -368,16 +391,16 @@ lua_rados_ioctx_close (lua_State *lstate)
 static int
 lua_rados_ioctx_stat (lua_State *lstate)
 {
-  rados_ioctx_t io;
+  lua_ioctx_t *ioctx;
   const char *oid;
   uint64_t size;
   time_t mtime;
   int ret;
 
-  io = lua_rados_checkioctx (lstate, 1);
+  ioctx = lua_rados_checkioctx (lstate, 1);
   oid = luaL_checkstring (lstate, 2);
 
-  ret = rados_stat (io, oid, &size, &mtime);
+  ret = rados_stat (ioctx->io, oid, &size, &mtime);
   if (ret)
     return lua_rados_pusherror (lstate, ret);
 
@@ -400,20 +423,20 @@ lua_rados_ioctx_stat (lua_State *lstate)
 static int
 lua_rados_ioctx_read (lua_State *lstate)
 {
-  rados_ioctx_t io;
+  lua_ioctx_t *ioctx;
   const char *oid;
   size_t size;
   uint64_t off;
   char *buf;
   int ret;
 
-  io = lua_rados_checkioctx (lstate, 1);
+  ioctx = lua_rados_checkioctx (lstate, 1);
   oid = luaL_checkstring (lstate, 2);
   size = luaL_checkint (lstate, 3);
   off = luaL_checkint (lstate, 4);
   buf = lua_rados_newbuffer (lstate, size);
 
-  ret = rados_read (io, oid, buf, size, off);
+  ret = rados_read (ioctx->io, oid, buf, size, off);
   if (ret < 0)
     return lua_rados_pusherror (lstate, ret);
 
