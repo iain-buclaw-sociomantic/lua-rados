@@ -195,7 +195,7 @@ AC_DEFUN([AX_PROG_LUA],
 
   dnl Find a Lua interpreter.
   m4_define_default([_AX_LUA_INTERPRETER_LIST],
-    [lua lua5.2 lua5.1 lua50])
+    [lua lua5.2 lua5.1 lua50 luajit])
 
   m4_if([$1], [],
   [ dnl No version check is needed. Find any Lua interpreter.
