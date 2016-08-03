@@ -203,10 +203,7 @@ lua_rados_create (lua_State *lstate)
   int ret;
 
   if (lua_gettop (lstate) > 0 && lua_type (lstate, 1) != LUA_TNIL)
-    {
-      luaL_checktype (lstate, 1, LUA_TSTRING);
-      id = lua_tostring (lstate, 1);
-    }
+    id = luaL_checkstring (lstate, 1);
   else
     id = NULL;
 
@@ -247,10 +244,7 @@ lua_rados_conf_read_file (lua_State *lstate)
   rados = lua_rados_checkcluster (lstate, 1);
 
   if (lua_gettop (lstate) > 1 && lua_type (lstate, 2) != LUA_TNIL)
-    {
-      luaL_checktype (lstate, 2, LUA_TSTRING);
-      path = lua_tostring (lstate, 2);
-    }
+    path = luaL_checkstring (lstate, 2);
   else
     path = NULL;
 
