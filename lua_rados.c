@@ -141,8 +141,15 @@ lua_rados_newbuffer (lua_State *lstate, int size)
   char *buf;
   char **pbuf;
 
+  if (size < 0)
+    return NULL;
+
+  if (size == 0)
+    size = 1;
+
   buf = (char *) malloc (size);
-  memset (buf, 0, size);
+  if (buf)
+    memset (buf, 0, size);
 
   pbuf = (char **) lua_newuserdata (lstate, sizeof (*pbuf));
   *pbuf = buf;
@@ -434,7 +441,10 @@ lua_rados_ioctx_read (lua_State *lstate)
   oid = luaL_checkstring (lstate, 2);
   size = luaL_checkint (lstate, 3);
   off = luaL_checkint (lstate, 4);
+
   buf = lua_rados_newbuffer (lstate, size);
+  if (!buf)
+    return lua_rados_pusherror (lstate, -ENOMEM);
 
   ret = rados_read (ioctx->io, oid, buf, size, off);
   if (ret < 0)
