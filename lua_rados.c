@@ -202,10 +202,7 @@ lua_rados_create (lua_State *lstate)
   const char *id;
   int ret;
 
-  if (lua_gettop (lstate) > 0 && lua_type (lstate, 1) != LUA_TNIL)
-    id = luaL_checkstring (lstate, 1);
-  else
-    id = NULL;
+  id = luaL_optstring (lstate, 1, NULL);
 
   rados = (lua_rados_t *) lua_newuserdata (lstate, sizeof (*rados));
   rados->state = CONFIGURING;
@@ -242,11 +239,7 @@ lua_rados_conf_read_file (lua_State *lstate)
   int ret;
 
   rados = lua_rados_checkcluster (lstate, 1);
-
-  if (lua_gettop (lstate) > 1 && lua_type (lstate, 2) != LUA_TNIL)
-    path = luaL_checkstring (lstate, 2);
-  else
-    path = NULL;
+  path = luaL_optstring (lstate, 2, NULL);
 
   ret = rados_conf_read_file (rados->cluster, path);
 
