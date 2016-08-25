@@ -4,6 +4,8 @@
 #include <errno.h>
 #include <stdlib.h>
 
+#define LUA_COMPAT_MODULE
+
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
