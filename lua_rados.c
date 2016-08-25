@@ -433,8 +433,8 @@ lua_rados_ioctx_read (lua_State *lstate)
 
   ioctx = lua_rados_checkioctx (lstate, 1);
   oid = luaL_checkstring (lstate, 2);
-  size = luaL_checkint (lstate, 3);
-  off = luaL_checkint (lstate, 4);
+  size = luaL_checkinteger (lstate, 3);
+  off = luaL_checkinteger (lstate, 4);
 
   buf = lua_rados_newbuffer (lstate, size);
   if (!buf)
