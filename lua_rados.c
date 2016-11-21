@@ -14,6 +14,7 @@
 
 #define LRAD_TRADOS_T "Rados.RadosT"
 #define LRAD_TIOCTX_T "Rados.IoctxT"
+#define LRAD_TCOMPLETION_T "Rados.CompletionT"
 #define LRAD_BUFFER_T "Rados.Buffer"
 
 static char reg_key_rados_refs;
@@ -42,6 +43,19 @@ typedef struct lua_ioctx_t
   rados_ioctx_t io;
   ioctx_state_t state;
 } lua_ioctx_t;
+
+typedef struct lua_completion_t
+{
+  rados_completion_t completion;
+  union
+  {
+    struct
+    {
+      uint64_t size;
+      time_t mtime;
+    };
+  };
+} lua_completion_t;
 
 /* Get rados object at stack index.  */
 
@@ -88,9 +102,17 @@ lua_rados_checkioctx (lua_State *lstate, int pos)
 
   ioctx = (lua_ioctx_t *) luaL_checkudata (lstate, pos, LRAD_TIOCTX_T);
   if (ioctx->state != OPEN)
-    luaL_argerror (lstate, pos, "cannout reuse closed ioctx handle");
+    luaL_argerror (lstate, pos, "cannot reuse closed ioctx handle");
 
   return ioctx;
+}
+
+/* Get rados completion object at stack index.  */
+
+static inline lua_completion_t *
+lua_rados_checkcompletion (lua_State *lstate, int pos)
+{
+  return (lua_completion_t *) luaL_checkudata (lstate, pos, LRAD_TCOMPLETION_T);
 }
 
 /* Push nil-error protocol values.  */
@@ -444,6 +466,107 @@ lua_rados_ioctx_read (lua_State *lstate)
   return 1;
 }
 
+/**
+  Asynchronously get object stat info (size/mtime)
+  @function aio_stat
+  @string oid object name
+  @return completion object
+  @usage completion = ioctx:aio_stat('obj3')
+ */
+static int
+lua_rados_ioctx_aio_stat (lua_State *lstate)
+{
+  lua_ioctx_t *ioctx;
+  const char *oid;
+  lua_completion_t *comp;
+  int ret;
+
+  ioctx = lua_rados_checkioctx (lstate, 1);
+  oid = luaL_checkstring (lstate, 2);
+
+  comp = (lua_completion_t *) lua_newuserdata (lstate, sizeof (*comp));
+  comp->completion = NULL;
+
+  luaL_getmetatable (lstate, LRAD_TCOMPLETION_T);
+  lua_setmetatable (lstate, -2);
+
+  ret = rados_aio_create_completion (NULL, NULL, NULL, &comp->completion);
+  if (ret)
+    return lua_rados_pusherror (lstate, ret);
+
+  ret = rados_aio_stat (ioctx->io, oid, comp->completion,
+			&comp->size, &comp->mtime);
+  if (ret)
+    return lua_rados_pusherror (lstate, ret);
+
+  /* return the userdata */
+  return 1;
+}
+
+/**
+  Has an asynchronous operation completed?
+  @function is_complete
+  @return whether the operation is complete
+  @usage complete = completion:is_complete()
+ */
+static int
+lua_rados_completion_complete (lua_State *lstate)
+{
+  lua_completion_t *comp;
+  int ret;
+
+  comp = lua_rados_checkcompletion (lstate, 1);
+
+  ret = rados_aio_is_complete (comp->completion);
+
+  lua_pushinteger (lstate, ret);
+
+  return 1;
+}
+
+/**
+  Get the return value of an asynchronous operation
+  @function get_return_value
+  @return len, mtime, or nil on failure
+  @return errstr and retval if failed
+  @usage size, mtime = completion:get_return_value()
+ */
+static int
+lua_rados_completion_get_return_value (lua_State *lstate)
+{
+  lua_completion_t *comp;
+  int ret;
+
+  comp = lua_rados_checkcompletion (lstate, 1);
+
+  ret = rados_aio_get_return_value (comp->completion);
+  if (ret < 0)
+    return lua_rados_pusherror (lstate, ret);
+
+  lua_pushinteger (lstate, comp->size);
+  lua_pushinteger (lstate, comp->mtime);
+
+  return 2;
+}
+
+/* Garbage collect the rados completion.  */
+
+static int
+lua_rados_completion_gc (lua_State *lstate)
+{
+  lua_completion_t *comp;
+
+  comp = lua_rados_checkcompletion (lstate, 1);
+
+  if (comp->completion != NULL)
+    {
+      rados_aio_release (comp->completion);
+      comp->completion = NULL;
+    }
+
+  return 0;
+}
+
 
 static const luaL_Reg clusterlib_m[] =
 {
@@ -457,9 +580,18 @@ static const luaL_Reg clusterlib_m[] =
 
 static const luaL_Reg ioctxlib_m[] =
 {
-  { "close", lua_rados_ioctx_close},
-  { "read", lua_rados_ioctx_read},
-  { "stat", lua_rados_ioctx_stat},
+  { "close", lua_rados_ioctx_close },
+  { "read", lua_rados_ioctx_read },
+  { "stat", lua_rados_ioctx_stat },
+  { "aio_stat", lua_rados_ioctx_aio_stat },
+  { NULL, NULL }
+};
+
+static const luaL_Reg completionlib_m[] =
+{
+  { "is_complete", lua_rados_completion_complete },
+  { "get_return_value", lua_rados_completion_get_return_value },
+  { "__gc", lua_rados_completion_gc },
   { NULL, NULL }
 };
 
@@ -485,6 +617,13 @@ luaopen_rados (lua_State *lstate)
   lua_pushvalue (lstate, -1);
   lua_setfield (lstate, -2, "__index");
   luaL_register (lstate, NULL, ioctxlib_m);
+  lua_pop (lstate, 1);
+
+  /* setup rados_completion_t userdata type */
+  luaL_newmetatable (lstate, LRAD_TCOMPLETION_T);
+  lua_pushvalue (lstate, -1);
+  lua_setfield (lstate, -2, "__index");
+  luaL_register (lstate, NULL, completionlib_m);
   lua_pop (lstate, 1);
 
   /* setup buffer userdata type */
