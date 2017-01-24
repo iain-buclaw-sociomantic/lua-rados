@@ -504,6 +504,89 @@ lua_rados_ioctx_aio_stat (lua_State *lstate)
 }
 
 /**
+  Read data from an object found at specified location.
+  @function read_loc
+  @string oid object name
+  @string loc locator key
+  @int length number of bytes read
+  @int offset offset in object from which to read
+  @return string with at most `length` bytes, or nil on error
+  @return errstr and retval if failed
+  @usage data = ioctx:read('obj3', 1000, 0)
+ */
+static int
+lua_rados_ioctx_read_loc (lua_State *lstate)
+{
+  lua_ioctx_t *ioctx;
+  const char *oid, *loc;
+  size_t size;
+  uint64_t off;
+  char *buf;
+  int ret;
+
+  ioctx = lua_rados_checkioctx (lstate, 1);
+  oid = luaL_checkstring (lstate, 2);
+  loc = luaL_optstring (lstate, 3, NULL);
+  size = luaL_checkinteger (lstate, 4);
+  off = luaL_checkinteger (lstate, 5);
+
+  buf = lua_rados_newbuffer (lstate, size);
+  if (!buf)
+    return lua_rados_pusherror (lstate, -ENOMEM);
+
+  rados_ioctx_locator_set_key (ioctx->io, loc);
+  ret = rados_read (ioctx->io, oid, buf, size, off);
+  rados_ioctx_locator_set_key (ioctx->io, NULL);
+  if (ret < 0)
+    return lua_rados_pusherror (lstate, ret);
+
+  lua_pushlstring (lstate, buf, ret);
+
+  return 1;
+}
+
+/**
+  Asynchronously get object stat info (size/mtime) found at specified location.
+  @function aio_stat_loc
+  @string oid object name
+  @string loc locator key
+  @return completion object
+  @usage completion = ioctx:aio_stat('obj3')
+ */
+static int
+lua_rados_ioctx_aio_stat_loc (lua_State *lstate)
+{
+  lua_ioctx_t *ioctx;
+  const char *oid, *loc;
+  lua_completion_t *comp;
+  int ret;
+
+  ioctx = lua_rados_checkioctx (lstate, 1);
+  oid = luaL_checkstring (lstate, 2);
+  loc = luaL_optstring (lstate, 3, NULL);
+
+  comp = (lua_completion_t *) lua_newuserdata (lstate, sizeof (*comp));
+  comp->completion = NULL;
+
+  luaL_getmetatable (lstate, LRAD_TCOMPLETION_T);
+  lua_setmetatable (lstate, -2);
+
+  ret = rados_aio_create_completion (NULL, NULL, NULL, &comp->completion);
+  if (ret)
+    return lua_rados_pusherror (lstate, ret);
+
+  rados_ioctx_locator_set_key (ioctx->io, loc);
+  ret = rados_aio_stat (ioctx->io, oid, comp->completion,
+			&comp->size, &comp->mtime);
+  rados_ioctx_locator_set_key (ioctx->io, NULL);
+  if (ret)
+    return lua_rados_pusherror (lstate, ret);
+
+  /* return the userdata */
+  return 1;
+}
+
+/**
   Has an asynchronous operation completed?
   @function is_complete
   @return whether the operation is complete
@@ -584,6 +667,8 @@ static const luaL_Reg ioctxlib_m[] =
   { "read", lua_rados_ioctx_read },
   { "stat", lua_rados_ioctx_stat },
   { "aio_stat", lua_rados_ioctx_aio_stat },
+  { "read_loc", lua_rados_ioctx_read_loc },
+  { "aio_stat_loc", lua_rados_ioctx_aio_stat_loc },
   { NULL, NULL }
 };
 
