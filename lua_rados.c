@@ -296,6 +296,24 @@ lua_rados_connect (lua_State *lstate)
 }
 
 /**
+  Return true if connected to the cluster.
+  @function is_connected
+  @return true if connected to cluster, false otherwise
+  @usage cluster:is_connected()
+  @usage ret = cluster:connected()
+ */
+static int
+lua_rados_is_connected (lua_State *lstate)
+{
+  lua_rados_t *rados;
+
+  rados = lua_rados_checkcluster_1 (lstate, 1);
+  lua_pushboolean (lstate, (rados->state == CONNECTED));
+
+  return 1;
+}
+
+/**
   Disconnect from the cluster.
   @function shutdown
   @usage cluster:shutdown()
@@ -655,6 +673,7 @@ static const luaL_Reg clusterlib_m[] =
 {
   { "conf_read_file", lua_rados_conf_read_file },
   { "connect", lua_rados_connect },
+  { "is_connected", lua_rados_is_connected },
   { "shutdown", lua_rados_shutdown },
   { "open_ioctx", lua_rados_open_ioctx },
   { "__gc", lua_rados_cluster_gc },
