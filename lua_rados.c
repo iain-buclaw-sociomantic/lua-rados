@@ -325,7 +325,10 @@ lua_rados_shutdown (lua_State *lstate)
 
   rados = lua_rados_checkcluster_conn (lstate, 1);
   if (rados->state != SHUTDOWN)
-    rados_shutdown (rados->cluster);
+    {
+      rados_shutdown (rados->cluster);
+      rados->cluster = NULL;
+    }
 
   rados->state = SHUTDOWN;
 
@@ -387,6 +390,12 @@ lua_rados_cluster_gc (lua_State *lstate)
   rados = lua_rados_checkcluster_1 (lstate, 1);
   if (rados->state == CONNECTED)
     rados_shutdown (rados->cluster);
+  else if (rados->cluster != NULL)
+    {
+      /* Call to rados_connect() was made and failed.  */
+      free (rados->cluster);
+      rados->cluster = NULL;
+    }
 
   rados->state = SHUTDOWN;
 
