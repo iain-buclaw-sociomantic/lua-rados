@@ -50,6 +50,39 @@ server
 }
 ```
 
+### NGINX config - AIO.
+```
+server
+{
+  location /rbd
+  {
+    content_by_lua_block
+    {
+      local loc, key = string.match(ngx.var.uri, "/rbd/(.+)/(.+)")
+      if ioctx and loc and key then
+        local completion = ioctx:aio_stat(loc, key)
+
+        -- Wait for completion - blocks worker thread.
+        completion:wait_for_complete()
+
+        local size = completion:get_return_value()
+        if size then
+          completion = ioctx:aio_stat(loc, key, size, 0)
+
+          -- Wait for completion - worker yields and nginx handles
+          -- another request while we wait.
+          while completion:is_complete() ~= 1 do
+            ngx.sleep(0.01)
+          end
+
+          ngx.print(completion:get_return_value())
+        end
+      end
+    }
+  }
+}
+```
+
 ### NGINX config - Complex.
 ```
 server
