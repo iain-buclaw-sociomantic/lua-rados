@@ -11,45 +11,27 @@ Please report bugs and make feature requests using the github tracker.
 Example
 -------
 
-### NGINX config - Simple.
+### NGINX config - Connecting to RADOS
 ```
-init_worker_by_lua_block
+init_by_lua_block
 {
-  cluster = rados.create()
-  cluster:conf_read_file()
-  cluster:connect()
-  ioctx = cluster:open_ioctx("rbd")
+  rados = require("rados")
 }
 
-server
-{
-  location /rbd
-  {
-    content_by_lua_block
-    {
-      local key = string.match(ngx.var.uri, "/rbd/(.+)")
-      if ioctx and key then
-        local size = ioctx:stat(key)
-          if size then
-            print(ioctx:read(key, size, 0))
-          end
-        end
-      }
-  }
-}
-```
-
-### NGINX config - Complex.
-```
 init_worker_by_lua_block
 {
   -- Create a persistent connection to the object store
   cluster = rados.create()
   cluster:conf_read_file()
   cluster:connect()
-  ioctx = cluster:open_ioctx("rbd")
+  if cluster:is_connected() then
+    ioctx = cluster:open_ioctx("rbd")
+  end
 }
+```
 
+### NGINX config - Simple.
+```
 server
 {
   location /rbd
@@ -57,9 +39,29 @@ server
     content_by_lua_block
     {
       local key = string.match(ngx.var.uri, "/rbd/(.+)")
-      -- We are connected and have matched a key
       if ioctx and key then
-        local size, mtime = ioctx:stat(key)
+        local size = ioctx:stat(nil, key)
+        if size then
+          ngx.print(ioctx:read(nil, key, size, 0))
+        end
+      end
+    }
+  }
+}
+```
+
+### NGINX config - Complex.
+```
+server
+{
+  location /rbd
+  {
+    content_by_lua_block
+    {
+      local loc, key = string.match(ngx.var.uri, "/rbd/(.+)/(.+)")
+      -- We are connected and have matched a key
+      if ioctx and loc and key then
+        local size, mtime = ioctx:stat(loc, key)
         -- Key exists in object store
         if size and mtime then
           -- We have an object to send, check client headers
@@ -86,7 +88,7 @@ server
                 ngx.header["Content-Range"] = "bytes */" .. size
                 ngx.status = 416
               else
-                data = ioctx:read(key, offset, rsize)
+                data = ioctx:read(loc, key, offset, rsize)
                 -- Return partial content to client
                 if data then
                   ngx.header["Content-Range"] = "bytes " .. from .. "-" .. to .. "/" .. size
@@ -95,7 +97,7 @@ server
                 end
               end
             else
-              data = ioctx:read(key, size, 0)
+              data = ioctx:read(loc, key, size, 0)
             end
 
             -- Fetched data without incident
