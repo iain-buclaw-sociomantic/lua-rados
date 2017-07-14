@@ -625,6 +625,23 @@ lua_rados_completion_complete (lua_State *lstate)
 }
 
 /**
+  Wait for an asynchronous operation to complete
+  @function wait_for_complete
+  @usage completion:wait_for_complete()
+ */
+static int
+lua_rados_completion_wait_for_complete (lua_State *lstate)
+{
+  lua_completion_t *comp;
+
+  comp = lua_rados_checkcompletion (lstate, 1);
+
+  rados_aio_wait_for_complete (comp->completion);
+
+  return 0;
+}
+
+/**
   Get the return value of an asynchronous operation
   @function get_return_value
   @return len, mtime, or nil on failure
@@ -708,6 +725,7 @@ static const luaL_Reg ioctxlib_m[] =
 static const luaL_Reg completionlib_m[] =
 {
   { "is_complete", lua_rados_completion_complete },
+  { "wait_for_complete", lua_rados_completion_wait_for_complete },
   { "get_return_value", lua_rados_completion_get_return_value },
   { "__gc", lua_rados_completion_gc },
   { NULL, NULL }
