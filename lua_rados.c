@@ -44,15 +44,23 @@ typedef struct lua_ioctx_t
   ioctx_state_t state;
 } lua_ioctx_t;
 
+typedef enum
+{
+  STAT,
+  READ
+} completion_state_t;
+
 typedef struct lua_completion_t
 {
   rados_completion_t completion;
-  union
+  completion_state_t state;
+  struct
   {
-    struct
+    uint64_t size;
+    union
     {
-      uint64_t size;
       time_t mtime;
+      char *buf;
     };
   };
 } lua_completion_t;
@@ -504,6 +512,7 @@ lua_rados_ioctx_read (lua_State *lstate)
 /**
   Asynchronously get object stat info (size/mtime)
   @function aio_stat
+  @string loc locator key
   @string oid object name
   @return completion object
   @usage completion = ioctx:aio_stat(nil, 'obj3')
@@ -522,6 +531,7 @@ lua_rados_ioctx_aio_stat (lua_State *lstate)
 
   comp = (lua_completion_t *) lua_newuserdata (lstate, sizeof (*comp));
   comp->completion = NULL;
+  comp->state = STAT;
 
   luaL_getmetatable (lstate, LRAD_TCOMPLETION_T);
   lua_setmetatable (lstate, -2);
@@ -533,6 +543,58 @@ lua_rados_ioctx_aio_stat (lua_State *lstate)
   rados_ioctx_locator_set_key (ioctx->io, loc);
   ret = rados_aio_stat (ioctx->io, oid, comp->completion,
 			&comp->size, &comp->mtime);
+  rados_ioctx_locator_set_key (ioctx->io, NULL);
+  if (ret)
+    return lua_rados_pusherror (lstate, ret);
+
+  /* return the userdata */
+  return 1;
+}
+
+/**
+  Asynchronously read data from an object.
+  @function aio_read
+  @string loc locator key
+  @string oid object name
+  @int length number of bytes read
+  @int offset offset in object from which to read
+  @return completion object
+  @usage completion = ioctx:aio_read(nil, 'obj3', 1000, 0)
+ */
+static int
+lua_rados_ioctx_aio_read (lua_State *lstate)
+{
+  lua_ioctx_t *ioctx;
+  const char *oid, *loc;
+  size_t size;
+  uint64_t off;
+  lua_completion_t *comp;
+  int ret;
+
+  ioctx = lua_rados_checkioctx (lstate, 1);
+  loc = luaL_optstring (lstate, 2, NULL);
+  oid = luaL_checkstring (lstate, 3);
+  size = luaL_checkinteger (lstate, 4);
+  off = luaL_checkinteger (lstate, 5);
+
+  comp = (lua_completion_t *) lua_newuserdata (lstate, sizeof (*comp));
+  comp->completion = NULL;
+  comp->state = READ;
+  comp->size = size;
+  comp->buf = (char *) malloc (comp->size);
+  if (!comp->buf)
+    return lua_rados_pusherror (lstate, -ENOMEM);
+
+  luaL_getmetatable (lstate, LRAD_TCOMPLETION_T);
+  lua_setmetatable (lstate, -2);
+
+  ret = rados_aio_create_completion (NULL, NULL, NULL, &comp->completion);
+  if (ret)
+    return lua_rados_pusherror (lstate, ret);
+
+  rados_ioctx_locator_set_key (ioctx->io, loc);
+  ret = rados_aio_read (ioctx->io, oid, comp->completion,
+			comp->buf, comp->size, off);
   rados_ioctx_locator_set_key (ioctx->io, NULL);
   if (ret)
     return lua_rados_pusherror (lstate, ret);
@@ -581,10 +643,20 @@ lua_rados_completion_get_return_value (lua_State *lstate)
   if (ret < 0)
     return lua_rados_pusherror (lstate, ret);
 
-  lua_pushinteger (lstate, comp->size);
-  lua_pushinteger (lstate, comp->mtime);
+  if (comp->state == STAT)
+    {
+      lua_pushinteger (lstate, comp->size);
+      lua_pushinteger (lstate, comp->mtime);
+      return 2;
+    }
+  else if (comp->state == READ)
+    {
+      lua_pushlstring (lstate, comp->buf, comp->size);
+      return 1;
+    }
 
-  return 2;
+  /* Unhandled completion request.  */
+  return lua_rados_pusherror (lstate, -EINVAL);
 }
 
 /* Garbage collect the rados completion.  */
@@ -600,6 +672,12 @@ lua_rados_completion_gc (lua_State *lstate)
     {
       rados_aio_release (comp->completion);
       comp->completion = NULL;
+    }
+
+  if (comp->state == READ && comp->buf != NULL)
+    {
+      free (comp->buf);
+      comp->buf = NULL;
     }
 
   return 0;
@@ -623,6 +701,7 @@ static const luaL_Reg ioctxlib_m[] =
   { "read", lua_rados_ioctx_read },
   { "stat", lua_rados_ioctx_stat },
   { "aio_stat", lua_rados_ioctx_aio_stat },
+  { "aio_read", lua_rados_ioctx_aio_read },
   { NULL, NULL }
 };
 
