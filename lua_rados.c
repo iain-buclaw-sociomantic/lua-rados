@@ -428,24 +428,28 @@ lua_rados_ioctx_close (lua_State *lstate)
 /**
   Get object stat info (size/mtime)
   @function stat
+  @string loc locator key
   @string oid object name
   @return len, mtime, or nil on failure
   @return errstr and retval if failed
-  @usage size, mtime = ioctx:stat('obj3')
+  @usage size, mtime = ioctx:stat(nil, 'obj3')
  */
 static int
 lua_rados_ioctx_stat (lua_State *lstate)
 {
   lua_ioctx_t *ioctx;
-  const char *oid;
+  const char *oid, *loc;
   uint64_t size;
   time_t mtime;
   int ret;
 
   ioctx = lua_rados_checkioctx (lstate, 1);
-  oid = luaL_checkstring (lstate, 2);
+  loc = luaL_optstring (lstate, 2, NULL);
+  oid = luaL_checkstring (lstate, 3);
 
+  rados_ioctx_locator_set_key (ioctx->io, loc);
   ret = rados_stat (ioctx->io, oid, &size, &mtime);
+  rados_ioctx_locator_set_key (ioctx->io, NULL);
   if (ret)
     return lua_rados_pusherror (lstate, ret);
 
@@ -458,33 +462,37 @@ lua_rados_ioctx_stat (lua_State *lstate)
 /**
   Read data from an object.
   @function read
+  @string loc locator key
   @string oid object name
   @int length number of bytes read
   @int offset offset in object from which to read
   @return string with at most `length` bytes, or nil on error
   @return errstr and retval if failed
-  @usage data = ioctx:read('obj3', 1000, 0)
+  @usage data = ioctx:read(nil, 'obj3', 1000, 0)
  */
 static int
 lua_rados_ioctx_read (lua_State *lstate)
 {
   lua_ioctx_t *ioctx;
-  const char *oid;
+  const char *oid, *loc;
   size_t size;
   uint64_t off;
   char *buf;
   int ret;
 
   ioctx = lua_rados_checkioctx (lstate, 1);
-  oid = luaL_checkstring (lstate, 2);
-  size = luaL_checkinteger (lstate, 3);
-  off = luaL_checkinteger (lstate, 4);
+  loc = luaL_optstring (lstate, 2, NULL);
+  oid = luaL_checkstring (lstate, 3);
+  size = luaL_checkinteger (lstate, 4);
+  off = luaL_checkinteger (lstate, 5);
 
   buf = lua_rados_newbuffer (lstate, size);
   if (!buf)
     return lua_rados_pusherror (lstate, -ENOMEM);
 
+  rados_ioctx_locator_set_key (ioctx->io, loc);
   ret = rados_read (ioctx->io, oid, buf, size, off);
+  rados_ioctx_locator_set_key (ioctx->io, NULL);
   if (ret < 0)
     return lua_rados_pusherror (lstate, ret);
 
@@ -498,18 +506,19 @@ lua_rados_ioctx_read (lua_State *lstate)
   @function aio_stat
   @string oid object name
   @return completion object
-  @usage completion = ioctx:aio_stat('obj3')
+  @usage completion = ioctx:aio_stat(nil, 'obj3')
  */
 static int
 lua_rados_ioctx_aio_stat (lua_State *lstate)
 {
   lua_ioctx_t *ioctx;
-  const char *oid;
+  const char *oid, *loc;
   lua_completion_t *comp;
   int ret;
 
   ioctx = lua_rados_checkioctx (lstate, 1);
-  oid = luaL_checkstring (lstate, 2);
+  loc = luaL_optstring (lstate, 2, NULL);
+  oid = luaL_checkstring (lstate, 3);
 
   comp = (lua_completion_t *) lua_newuserdata (lstate, sizeof (*comp));
   comp->completion = NULL;
@@ -521,8 +530,10 @@ lua_rados_ioctx_aio_stat (lua_State *lstate)
   if (ret)
     return lua_rados_pusherror (lstate, ret);
 
+  rados_ioctx_locator_set_key (ioctx->io, loc);
   ret = rados_aio_stat (ioctx->io, oid, comp->completion,
 			&comp->size, &comp->mtime);
+  rados_ioctx_locator_set_key (ioctx->io, NULL);
   if (ret)
     return lua_rados_pusherror (lstate, ret);
 
