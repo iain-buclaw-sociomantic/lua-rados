@@ -17,6 +17,8 @@
 #define LRAD_TCOMPLETION_T "Rados.CompletionT"
 #define LRAD_BUFFER_T "Rados.Buffer"
 
+static int active_completions = 0;
+
 static char reg_key_rados_refs;
 
 typedef enum
@@ -216,6 +218,19 @@ lua_rados_version (lua_State *lstate)
   lua_pushinteger (lstate, extra);
 
   return 3;
+}
+
+/**
+  Get the number of open completions.
+  @function open_completions
+  @return number of open completions.
+  @usage num = rados.open_completions()
+ */
+static int
+lua_rados_open_completions (lua_State *lstate)
+{
+  lua_pushinteger (lstate, __sync_add_and_fetch (&active_completions, 0));
+  return 1;
 }
 
 /**
@@ -540,6 +555,7 @@ lua_rados_ioctx_aio_stat (lua_State *lstate)
   if (ret)
     return lua_rados_pusherror (lstate, ret);
 
+  __sync_add_and_fetch (&active_completions, 1);
   rados_ioctx_locator_set_key (ioctx->io, loc);
   ret = rados_aio_stat (ioctx->io, oid, comp->completion,
 			&comp->size, &comp->mtime);
@@ -592,6 +608,7 @@ lua_rados_ioctx_aio_read (lua_State *lstate)
   if (ret)
     return lua_rados_pusherror (lstate, ret);
 
+  __sync_add_and_fetch (&active_completions, 1);
   rados_ioctx_locator_set_key (ioctx->io, loc);
   ret = rados_aio_read (ioctx->io, oid, comp->completion,
 			comp->buf, comp->size, off);
@@ -689,6 +706,7 @@ lua_rados_completion_gc (lua_State *lstate)
     {
       rados_aio_release (comp->completion);
       comp->completion = NULL;
+      __sync_sub_and_fetch (&active_completions, 1);
     }
 
   if (comp->state == COMPLETION_READ && comp->buf != NULL)
@@ -734,6 +752,7 @@ static const luaL_Reg completionlib_m[] =
 static const luaL_Reg radoslib_f[] =
 {
   { "version", lua_rados_version },
+  { "open_completions", lua_rados_open_completions },
   { "create", lua_rados_create },
   { NULL, NULL }
 };
