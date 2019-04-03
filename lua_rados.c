@@ -403,6 +403,29 @@ lua_rados_open_ioctx (lua_State *lstate)
   return 1;
 }
 
+/**
+  Register us as a daemon providing a particular service.
+ */
+
+static int
+lua_rados_service_register (lua_State *lstate)
+{
+  lua_rados_t *rados;
+  const char *service;
+  const char *daemon;
+  int ret;
+
+  rados = lua_rados_checkcluster_conn (lstate, 1);
+  service = luaL_checkstring (lstate, 2);
+  daemon = luaL_checkstring (lstate, 3);
+
+  ret = rados_service_register (rados->cluster, service, daemon, "");
+  if (ret)
+    return lua_rados_pusherror (lstate, ret);
+
+  return 0;
+}
+
 /* Garbage collect the rados object, and shutdown only if connected.  */
 
 static int
@@ -726,6 +749,7 @@ static const luaL_Reg clusterlib_m[] =
   { "is_connected", lua_rados_is_connected },
   { "shutdown", lua_rados_shutdown },
   { "open_ioctx", lua_rados_open_ioctx },
+  { "register", lua_rados_service_register },
   { "__gc", lua_rados_cluster_gc },
   { NULL, NULL }
 };
